@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# based on https://github.com/Zyg0te/tcplay-helper
+# inspired by https://github.com/Zyg0te/tcplay-helper
 # TODO:
 # * check for losetup and other utils
+# * create
 
 set -e
 
