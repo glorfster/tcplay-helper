@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# based on https://github.com/Zyg0te/tcplay-helper
+# TODO:
+# * check for losetup and other utils
+
+set -e
+
+cryptdev=$2
+
+# Trap SIGINT
+trap cleanup SIGINT EXIT
+
+to_rollback() {
+   to_rollback_cmds="$@; $to_rollback_cmds"
+}
+
+success() {
+   is_success=1
+   exit 0
+}
+
+cleanup() {
+  trap - SIGINT EXIT
+  [[ -n "$is_success" ]] && exit 0
+  eval "set +e; $to_rollback_cmds"
+  exit 1
+}
+
+print_usage(){
+  printf "%s\n" "Usage: [Operation] [Container] [OPTIONS]
+    open [container] [mountpoint] [optional - user to mount as]
+    close [container]
+ 
+    The SIZE argument is an integer and optional unit (example: 10K is 10*1024).
+    Units are K,M,G,T,P,E,Z,Y (powers of 1024) or KB,MB,... (powers of 1000)"
+}
+
+# must be run as root
+if (( $EUID != 0 )); then
+  printf "%s\n" "Root permissions required."
+  exit 1
+fi
+
+# create container and format it as ext4
+if [[ $1 == open ]]; then
+    while read -r passphrase; do
+        break
+    done
+    cryptdevname=($(md5sum <<< "$cryptdev"))
+    if ! dmsetup ls | grep -qF "$cryptdevname"; then
+        loopdev=$(losetup -f)
+        losetup "$loopdev" "$cryptdev"
+        to_rollback losetup -d "$loopdev"
+        tcplay -m "$cryptdevname" -d "$loopdev" <<< $passphrase
+        to_rollback dmsetup remove "$cryptdevname"
+	#fsck -V /dev/mapper/"$cryptdevname" 
+    fi
+
+    mountpoint=$3
+    findmnt "$mountpoint" -n && success
+
+    [[ -d $mountpoint ]] || mkdir -p "$mountpoint"
+
+    mount -o noatime /dev/mapper/"$cryptdevname" "$mountpoint"
+    to_rollback umount -f "$mountpoint"
+    success
+elif [[ "$1" == close ]]; then
+    name=$2
+    [[ -z "$name" ]] && exit 1
+
+    dmlist=`dmsetup ls | cut -f 1`
+    if echo "$dmlist" | grep -qF "$name"; then
+        device=`tcplay -j "$name" | grep Device | cut -f 2 -d:`
+    else
+        eval `findmnt "$name" -Pf`
+        if [[ -n "$SOURCE" ]]; then
+            name=`echo "$SOURCE" | sed -e 's/\/dev\/mapper\///'`
+            device=`tcplay -j "$name" | grep Device | cut -f 2 -d:`
+        fi
+    fi
+
+    if [[ -z "$device" ]]; then
+        echo "Unknown name $name" >&2
+        exit 1
+    fi
+
+    umount /dev/mapper/"$name"
+    dmsetup remove "$name"
+    losetup -d $device
+    success
+elif [[ $1 == create ]]; then
+    loopdev=$(losetup -f)
+    fallocate -l "$3" "$cryptdev"
+    losetup "$loopdev" "$cryptdev"
+    tcplay -c -d "$loopdev" -a whirlpool -b AES-256-XTS
+    tcplay -m "$cryptdev" -d "$loopdev"
+    mkfs.xfs /dev/mapper/"$cryptdev"
+    sleep 2
+    dmsetup remove "$cryptdev"
+    losetup -d "$loopdev"
+    success
+else
+  print_usage
+fi
