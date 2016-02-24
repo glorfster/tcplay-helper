@@ -1,0 +1,3 @@
+auth		optional	pam_mount.so
+password	optional	pam_mount.so
+session		optional	pam_mount.so

@@ -1,6 +1,6 @@
 # tcplay-helper
 ## Using with the `pam_mount`:
-* add `/etc/pam.d/mount`
+* add `/etc/pam.d/mount` (or copy the local `pam-mount` to `/etc/pam.d/mount`
 ```
 auth            optional        pam_mount.so
 password        optional        pam_mount.so
